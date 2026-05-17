@@ -47,6 +47,36 @@ import { generateKeyPairSync } from 'node:crypto';
 import { isIP } from 'node:net';
 import forge from 'node-forge';
 
+/**
+ * CA certificate validity window.
+ *
+ * The CA is the agent's trust anchor: its PEM is handed to the agent
+ * child via `NODE_EXTRA_CA_CERTS`, which Node reads exactly once at
+ * process startup and never re-reads — so the CA cannot be rotated
+ * mid-session. It must therefore outlive the longest possible runner
+ * process. Real OS root stores are valid for decades; we mirror that.
+ *
+ * This is not a security control: the CA is still ephemeral
+ * (generated per session, unlinked on `TraceHost.close()`), loopback-
+ * scoped, and its private key never leaves the runner. The previous
+ * 24-hour window protected nothing real — the threat model is local
+ * filesystem access — but it *did* expire mid-session and break every
+ * agent TLS handshake on runs longer than a day.
+ */
+const CA_VALIDITY_MS = 10 * 365 * 24 * 60 * 60 * 1000;
+
+/**
+ * Leaf certificate validity window. Kept short, like a real public
+ * leaf cert — `issueLeaf` re-signs a cached leaf once it comes within
+ * `LEAF_RENEW_BEFORE_MS` of expiry, which is the local equivalent of a
+ * real endpoint rotating its own cert. A multi-day session therefore
+ * never serves a stale leaf even though the leaf window is finite.
+ */
+const LEAF_VALIDITY_MS = 90 * 24 * 60 * 60 * 1000;
+
+/** Re-issue a cached leaf once it's this close to (or past) `notAfter`. */
+const LEAF_RENEW_BEFORE_MS = 24 * 60 * 60 * 1000;
+
 export interface TraceCa {
   /** PEM-encoded CA certificate — safe to share with the agent via NODE_EXTRA_CA_CERTS. */
   readonly caCertPem: string;
@@ -70,10 +100,12 @@ export interface IssuedCert {
 
 export interface CertPool {
   /**
-   * Get a leaf cert valid for `hostname`. Cached per hostname across
-   * the CertPool's lifetime, so the second MITM flow to the same
-   * host reuses the cert without re-signing. Safe to call from
-   * multiple concurrent sessions.
+   * Get a leaf cert valid for `hostname`. Cached per hostname, so a
+   * repeat MITM flow to the same host reuses the cert without
+   * re-signing — except when the cached leaf is within
+   * `LEAF_RENEW_BEFORE_MS` of expiry, in which case it is re-issued
+   * transparently so a long-running session never serves a stale
+   * leaf. Safe to call from multiple concurrent sessions.
    */
   issueLeaf(hostname: string): IssuedCert;
   readonly ca: TraceCa;
@@ -138,9 +170,9 @@ export function createTraceCa(): TraceCa {
   const leafKeys = generateRsaKeysFast();
 
   const now = new Date();
-  // 24-hour validity — the CA is session-scoped, and a short
-  // validity limits damage if the cert PEM is somehow leaked.
-  const validUntil = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  // Decade-scale validity — the CA is the agent's trust anchor and
+  // cannot be rotated mid-session. See `CA_VALIDITY_MS`.
+  const validUntil = new Date(now.getTime() + CA_VALIDITY_MS);
 
   const caAttrs = [
     { name: 'commonName', value: 'ac7 trace CA' },
@@ -170,20 +202,35 @@ export function createTraceCa(): TraceCa {
   };
 }
 
+/** A cached leaf plus the absolute `notAfter` used to decide renewal. */
+interface CachedLeaf {
+  cert: IssuedCert;
+  /** Epoch ms of the leaf's `notAfter`. */
+  notAfter: number;
+}
+
 /**
  * Build a CertPool over an existing CA. Issues leaves lazily and
- * caches them so repeat hits on the same hostname are zero-cost.
+ * caches them so repeat hits on the same hostname are zero-cost —
+ * until a cached leaf nears expiry, when the next call re-issues it.
  */
 export function createCertPool(ca: TraceCa): CertPool {
-  const cache = new Map<string, IssuedCert>();
+  const cache = new Map<string, CachedLeaf>();
   let serial = 2;
 
   const issueLeaf = (hostname: string): IssuedCert => {
     const cached = cache.get(hostname);
-    if (cached) return cached;
+    // Reuse a cached leaf only while it has comfortable life left.
+    // Re-issuing as it nears `notAfter` is the local stand-in for a
+    // real endpoint rotating its cert — without it, the per-hostname
+    // cache would pin the first leaf for the whole runner lifetime
+    // and a multi-day session would serve an expired cert.
+    if (cached && cached.notAfter - Date.now() > LEAF_RENEW_BEFORE_MS) {
+      return cached.cert;
+    }
 
     const now = new Date();
-    const validUntil = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    const validUntil = new Date(now.getTime() + LEAF_VALIDITY_MS);
 
     // IP vs DNS SAN — `isIP` returns 4 for IPv4, 6 for IPv6, 0 for
     // non-IPs (DNS hostnames). SubjectAltName `type: 7` is IP,
@@ -232,7 +279,7 @@ export function createCertPool(ca: TraceCa): CertPool {
       certPem: forge.pki.certificateToPem(leafCert),
       keyPem: ca.leafKeyPem,
     };
-    cache.set(hostname, out);
+    cache.set(hostname, { cert: out, notAfter: validUntil.getTime() });
     return out;
   };
 

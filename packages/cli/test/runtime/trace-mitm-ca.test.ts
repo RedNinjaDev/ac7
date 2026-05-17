@@ -9,8 +9,10 @@
  */
 
 import { createPrivateKey, X509Certificate } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createCertPool, createTraceCa } from '../../src/runtime/trace/mitm/ca.js';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 describe('createTraceCa', () => {
   it('generates a CA cert that Node can parse as X509', () => {
@@ -23,6 +25,16 @@ describe('createTraceCa', () => {
     expect(x509.validTo).toBeTruthy();
     // CA cert subject must match its own issuer (self-signed)
     expect(x509.subject).toBe(x509.issuer);
+  });
+
+  it('issues a CA valid for years — it cannot be rotated mid-session', () => {
+    // NODE_EXTRA_CA_CERTS is read once at agent-child startup, so the
+    // CA must outlive the longest runner process. A short window (the
+    // old 24h) expired mid-session and broke every agent TLS handshake.
+    const ca = createTraceCa();
+    const x509 = new X509Certificate(ca.caCertPem);
+    const lifespanMs = new Date(x509.validTo).getTime() - new Date(x509.validFrom).getTime();
+    expect(lifespanMs).toBeGreaterThan(365 * DAY_MS);
   });
 
   it('produces a leaf private key PEM that Node accepts', () => {
@@ -63,6 +75,31 @@ describe('createCertPool', () => {
     const a = pool.issueLeaf('api.anthropic.com');
     const b = pool.issueLeaf('api.anthropic.com');
     expect(b.certPem).toBe(a.certPem);
+  });
+
+  it('re-issues a cached leaf once it nears expiry', () => {
+    // The per-hostname cache would otherwise pin the first leaf for the
+    // whole runner lifetime; a multi-day session would then serve an
+    // expired leaf. issueLeaf re-signs as the cached one nears notAfter.
+    vi.useFakeTimers();
+    try {
+      const start = new Date('2030-01-01T00:00:00Z');
+      vi.setSystemTime(start);
+      const ca = createTraceCa();
+      const pool = createCertPool(ca);
+      const first = pool.issueLeaf('api.anthropic.com');
+      // Still fresh — cache hit, identical PEM.
+      expect(pool.issueLeaf('api.anthropic.com').certPem).toBe(first.certPem);
+      // Advance to within a day of the leaf's expiry → re-issue.
+      vi.setSystemTime(new Date(start.getTime() + 90 * DAY_MS - 60 * 60 * 1000));
+      const renewed = pool.issueLeaf('api.anthropic.com');
+      expect(renewed.certPem).not.toBe(first.certPem);
+      // The renewed leaf is valid well past the original's expiry.
+      const x = new X509Certificate(renewed.certPem);
+      expect(new Date(x.validTo).getTime()).toBeGreaterThan(start.getTime() + 90 * DAY_MS);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('issues distinct leaves for distinct hostnames', () => {
