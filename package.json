@@ -25,9 +25,9 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.15",
-    "turbo": "^2.9.12",
+    "turbo": "^2.9.14",
     "typescript": "^6.0.3",
-    "vite": "^8.0.12"
+    "vite": "^8.0.13"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
