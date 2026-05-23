@@ -129,6 +129,87 @@ describe('setupCodexHome', () => {
     expect(existsSync(handle.path)).toBe(false);
   });
 
+  it('emits model_provider and [model_providers.*] block when modelProvider is set', () => {
+    const fakeRealHome = join(workDir, 'fake-codex');
+    mkdirSync(fakeRealHome);
+    writeFileSync(join(fakeRealHome, 'auth.json'), '{}');
+
+    const handle = setupCodexHome({
+      realCodexHome: fakeRealHome,
+      parentDir: workDir,
+      bridgeCommand: '/usr/bin/node',
+      bridgeArgs: ['/path/to/cli/dist/index.js', 'mcp-bridge'],
+      runnerSocketPath: '/tmp/ac7-runner-xyz.sock',
+      modelProvider: {
+        name: 'qwen',
+        baseUrl: 'http://localhost:8000/v1',
+        wireApi: 'chat',
+      },
+    });
+
+    try {
+      const toml = readFileSync(handle.configPath, 'utf8');
+      expect(toml).toContain('model_provider = "qwen"');
+      expect(toml).toContain('[model_providers.qwen]');
+      expect(toml).toContain('base_url = "http://localhost:8000/v1"');
+      expect(toml).toContain('wire_api = "chat"');
+      expect(toml).toContain('env_key = "OPENAI_API_KEY"');
+      // mcp block must still be present
+      expect(toml).toContain('[mcp_servers.ac7]');
+    } finally {
+      handle.remove();
+    }
+  });
+
+  it('defaults wireApi to chat and uses custom envKey when provided', () => {
+    const fakeRealHome = join(workDir, 'fake-codex');
+    mkdirSync(fakeRealHome);
+    writeFileSync(join(fakeRealHome, 'auth.json'), '{}');
+
+    const handle = setupCodexHome({
+      realCodexHome: fakeRealHome,
+      parentDir: workDir,
+      bridgeCommand: '/usr/bin/node',
+      bridgeArgs: ['mcp-bridge'],
+      runnerSocketPath: '/tmp/sock',
+      modelProvider: {
+        name: 'local',
+        baseUrl: 'http://localhost:11434/v1',
+        envKey: 'MY_API_KEY',
+      },
+    });
+
+    try {
+      const toml = readFileSync(handle.configPath, 'utf8');
+      expect(toml).toContain('wire_api = "chat"');
+      expect(toml).toContain('env_key = "MY_API_KEY"');
+    } finally {
+      handle.remove();
+    }
+  });
+
+  it('does not emit model_provider block when modelProvider is absent', () => {
+    const fakeRealHome = join(workDir, 'fake-codex');
+    mkdirSync(fakeRealHome);
+    writeFileSync(join(fakeRealHome, 'auth.json'), '{}');
+
+    const handle = setupCodexHome({
+      realCodexHome: fakeRealHome,
+      parentDir: workDir,
+      bridgeCommand: '/usr/bin/node',
+      bridgeArgs: ['mcp-bridge'],
+      runnerSocketPath: '/tmp/sock',
+    });
+
+    try {
+      const toml = readFileSync(handle.configPath, 'utf8');
+      expect(toml).not.toContain('model_provider');
+      expect(toml).not.toContain('[model_providers.');
+    } finally {
+      handle.remove();
+    }
+  });
+
   it('escapes special characters in TOML strings', () => {
     const fakeRealHome = join(workDir, 'fake-codex');
     mkdirSync(fakeRealHome);

@@ -34,6 +34,7 @@ codex login
 
 ```
 ac7 codex [--no-trace] [--cwd <dir>] [--model <name>]
+          [--model-provider <name> --base-url <url>] [--wire-api <chat|responses>]
           [--url <url>] [--token <secret>]
 ```
 
@@ -42,6 +43,9 @@ ac7 codex [--no-trace] [--cwd <dir>] [--model <name>]
 | `--no-trace` | bool | off | Disable trace capture: no MITM proxy, no per-session CA, no env injection. The runner still does briefing + IPC + channel routing normally. |
 | `--cwd <dir>` | path | `process.cwd()` | Working directory for codex. Codex's `apply-patch` and shell tools resolve paths relative to this. |
 | `--model <name>` | string | codex picks | Forwarded into `thread/start` as `model`. Codex's default model selection takes over when omitted. |
+| `--model-provider <name>` | string | — | Short identifier for a local/custom provider (e.g. `qwen`). Must be paired with `--base-url`. |
+| `--base-url <url>` | string | — | Base URL for the local OpenAI-compatible endpoint (e.g. `http://localhost:8000/v1`). Required with `--model-provider`. |
+| `--wire-api <protocol>` | `chat` \| `responses` | `chat` | Wire protocol for the local provider. `chat` selects `/v1/chat/completions`; `responses` selects the Responses API. |
 | `--url <url>` | string | `http://127.0.0.1:8717` | Broker base URL. Falls back to `$AC7_URL`. |
 | `--token <secret>` | string | — | Bearer token. Falls back to `$AC7_TOKEN` then `~/.config/ac7/auth.json`. |
 
@@ -263,6 +267,52 @@ records: host, method, URL, status, header + body previews, with
 the same redaction patterns applied. The information is there;
 the rendering is uglier.
 
+## Using a local or self-hosted OpenAI-compatible provider
+
+If you have a local LLM server that exposes an OpenAI-compatible API
+(llama.cpp `llama-server`, vLLM, Ollama, etc.) you can point the
+codex runner at it instead of OpenAI. Pass `--model-provider` and
+`--base-url` together:
+
+```bash
+# llama.cpp server on port 8000 (e.g. Qwen-MoE via llama-server)
+ac7 codex \
+  --model-provider qwen \
+  --base-url http://localhost:8000/v1 \
+  --model qwen3-coder-30b
+
+# Ollama running locally
+ac7 codex \
+  --model-provider ollama \
+  --base-url http://localhost:11434/v1 \
+  --model llama3.1:8b
+```
+
+When `--model-provider` is set:
+
+- The ephemeral `config.toml` gets a `[model_providers.<name>]` block
+  and `model_provider = "<name>"` so codex routes to your endpoint.
+- `~/.codex/auth.json` is still symlinked if it exists, but **its
+  absence is not an error** — local servers don't require OpenAI
+  credentials.
+- If the env key codex uses for the API credential (`OPENAI_API_KEY`
+  by default, or the `--wire-api`-matched key for your provider) is
+  not set, the runner injects `local` as a placeholder. Most local
+  servers accept any non-empty value.
+- Trace capture still works at the transport level. Individual
+  exchanges land as `opaque_http` for now; a typed OpenAI parser is
+  a planned follow-up.
+
+**`--wire-api`** selects the HTTP endpoint shape:
+
+| Value | Endpoint |
+|---|---|
+| `chat` (default) | `/v1/chat/completions` |
+| `responses` | Responses API |
+
+Most local LLM servers expose the `chat` wire API. Use `responses`
+only if your server explicitly supports the newer shape.
+
 ## Common patterns
 
 ```bash
@@ -279,6 +329,9 @@ ac7 codex --cwd ~/projects/widget-service
 
 # Disable trace (debugging IPC plumbing)
 ac7 codex --no-trace
+
+# Use a local llama-server (no OpenAI account needed)
+ac7 codex --model-provider qwen --base-url http://localhost:8000/v1 --model qwen3-coder-30b
 ```
 
 ## What you give up vs claude-code
