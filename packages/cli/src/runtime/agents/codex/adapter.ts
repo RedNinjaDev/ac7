@@ -36,7 +36,7 @@ import type { TraceHost } from '../../trace/host.js';
 import { attachCodexBusySniff, type CodexBusySniff } from './busy-sniff.js';
 import type { CodexChannelSink } from './channel-sink.js';
 import { createCodexChannelSink } from './channel-sink.js';
-import { setupCodexHome } from './codex-home.js';
+import { type ModelProviderOptions, setupCodexHome } from './codex-home.js';
 import { createJsonRpcClient, type JsonRpcClient } from './json-rpc.js';
 import {
   type ItemCompletedNotification,
@@ -108,6 +108,13 @@ export interface CodexSpawnOptions {
   cwd?: string;
   /** Optional model override (`--model`). */
   model?: string;
+  /**
+   * When set, configures a local or self-hosted OpenAI-compatible
+   * provider via the ephemeral `config.toml`. Suppresses the "run
+   * `codex login`" warning when `~/.codex/auth.json` is absent —
+   * local providers don't require OpenAI credentials.
+   */
+  modelProvider?: ModelProviderOptions;
   /** Presence signal — flipped by status notifications. */
   presence: Presence;
   /**
@@ -140,12 +147,18 @@ export async function spawnCodex(opts: CodexSpawnOptions): Promise<CodexSpawnRes
     bridgeCommand: opts.bridgeCommand,
     bridgeArgs: opts.bridgeArgs,
     runnerSocketPath: opts.runnerSocketPath,
+    modelProvider: opts.modelProvider,
   });
   if (!codexHome.authLinked) {
-    process.stderr.write(
-      'ac7 codex: no codex auth.json found in ~/.codex — run `codex login` first ' +
-        'so the spawned codex can talk to OpenAI.\n',
-    );
+    if (opts.modelProvider) {
+      // Expected for local providers — no OpenAI auth needed.
+      opts.log('codex: no ~/.codex/auth.json found (using local provider, no OpenAI auth required)');
+    } else {
+      process.stderr.write(
+        'ac7 codex: no codex auth.json found in ~/.codex — run `codex login` first ' +
+          'so the spawned codex can talk to OpenAI.\n',
+      );
+    }
   }
 
   // 2. Build the codex subprocess env. CODEX_HOME points at our
@@ -154,6 +167,15 @@ export async function spawnCodex(opts: CodexSpawnOptions): Promise<CodexSpawnRes
   //    (CODEX_CA_CERTIFICATE).
   const childEnv: NodeJS.ProcessEnv = { ...process.env };
   childEnv.CODEX_HOME = codexHome.path;
+  // For local providers, ensure the env key codex looks up for the
+  // API credential is set. Local servers typically accept any non-empty
+  // value; we use 'local' as a recognisable placeholder.
+  if (opts.modelProvider) {
+    const apiKeyEnv = opts.modelProvider.envKey ?? 'OPENAI_API_KEY';
+    if (!childEnv[apiKeyEnv]) {
+      childEnv[apiKeyEnv] = 'local';
+    }
+  }
   if (opts.traceHost !== null) {
     const nodeStyle = opts.traceHost.envVars(process.env);
     // Proxy variables: codex's reqwest client honors HTTPS_PROXY /

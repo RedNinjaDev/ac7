@@ -41,6 +41,7 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { DEFAULT_PORT, ENV } from '@agentc7/sdk/protocol';
 import { CodexAdapterError, findCodexBinary, spawnCodex } from '../runtime/agents/codex/adapter.js';
+import type { ModelProviderOptions } from '../runtime/agents/codex/codex-home.js';
 import { createPresence } from '../runtime/presence.js';
 import { type RunnerHandle, RunnerStartupError, startRunner } from '../runtime/runner.js';
 import { createSessionLog } from '../runtime/session-log.js';
@@ -55,6 +56,12 @@ export interface CodexCommandInput {
   cwd?: string;
   /** Optional model override forwarded as `thread/start`'s `model`. */
   model?: string;
+  /**
+   * When set, routes codex to a local or self-hosted OpenAI-compatible
+   * endpoint instead of OpenAI. Corresponds to `--model-provider`,
+   * `--base-url`, and `--wire-api` CLI flags.
+   */
+  modelProvider?: ModelProviderOptions;
   /** Disable trace capture. */
   noTrace?: boolean;
   /** Optional logger override; defaults to a session log + stderr. */
@@ -183,6 +190,7 @@ export async function runCodexCommand(input: CodexCommandInput): Promise<number>
       codexBinary,
       cwd,
       model: input.model,
+      modelProvider: input.modelProvider,
       presence,
       // Share the trace host's busy signal so codex tool-lifecycle
       // notifications and MITM-derived LLM bumps both feed one

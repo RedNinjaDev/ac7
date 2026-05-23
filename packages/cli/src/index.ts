@@ -57,7 +57,9 @@ usage:
   ac7 quickstart  [--skip-browser] [--assignee <name>]   seed a demo objective + open the web UI
   ac7 telemetry   enable|disable|preview|rotate|status       opt-in, zero-PII, off-by-default install telemetry
   ac7 claude-code [--no-trace] [--doctor] [--skip-doctor] [--unsafe-tls] [-- <claude args>...]   spawn claude-code wrapped in a ac7 runner
-  ac7 codex       [--no-trace] [--cwd <dir>] [--model <name>]   spawn OpenAI Codex CLI as a headless agent member of a ac7 team
+  ac7 codex       [--no-trace] [--cwd <dir>] [--model <name>]
+                  [--model-provider <name> --base-url <url>] [--wire-api <chat|responses>]
+                                    spawn Codex CLI as a headless agent; omit --model-provider to use OpenAI
   ac7 push        --body <text> (--agent <id> | --broadcast) [--title <t>] [--level <lvl>] [--data key=value]...
   ac7 roster      [--reveal-token --member <name> [--config-path <path>]]
                                     list teammates (no flags) or rotate+print a user's token (alias over 'ac7 rotate')
@@ -813,10 +815,13 @@ async function handleClaudeCode(args: string[]): Promise<void> {
  * `notifications/claude/channel` ambient injection.
  *
  * Args (everything is optional):
- *   --no-trace           disable the MITM trace host
- *   --cwd <dir>          working directory for codex (default: cwd)
- *   --model <name>       override the codex model (default: codex picks)
- *   --url / --token      same as the other ac7 verbs
+ *   --no-trace                 disable the MITM trace host
+ *   --cwd <dir>                working directory for codex (default: cwd)
+ *   --model <name>             override the codex model (default: codex picks)
+ *   --model-provider <name>    short name for a local provider (e.g. qwen)
+ *   --base-url <url>           base URL for the local provider (required with --model-provider)
+ *   --wire-api <chat|responses>  wire protocol for the local provider (default: chat)
+ *   --url / --token            same as the other ac7 verbs
  */
 async function handleCodex(args: string[]): Promise<void> {
   let url: string | undefined;
@@ -824,6 +829,11 @@ async function handleCodex(args: string[]): Promise<void> {
   let cwd: string | undefined;
   let model: string | undefined;
   let noTrace = false;
+  let modelProviderName: string | undefined;
+  let baseUrl: string | undefined;
+  let wireApi: string | undefined;
+
+  const valueFlags = new Set(['--url', '--token', '--cwd', '--model', '--model-provider', '--base-url', '--wire-api']);
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -836,7 +846,7 @@ async function handleCodex(args: string[]): Promise<void> {
       noTrace = true;
       continue;
     }
-    if (arg === '--url' || arg === '--token' || arg === '--cwd' || arg === '--model') {
+    if (valueFlags.has(arg)) {
       const next = args[i + 1];
       if (next === undefined) {
         fail(`${arg} requires a value`, 2);
@@ -854,12 +864,41 @@ async function handleCodex(args: string[]): Promise<void> {
         case '--model':
           model = next as string;
           break;
+        case '--model-provider':
+          modelProviderName = next as string;
+          break;
+        case '--base-url':
+          baseUrl = next as string;
+          break;
+        case '--wire-api':
+          wireApi = next as string;
+          break;
       }
       i++;
       continue;
     }
     fail(`ac7 codex: unknown arg: ${arg}`, 2);
   }
+
+  // Validate local-provider flags: --model-provider and --base-url must be used together.
+  if (modelProviderName !== undefined && baseUrl === undefined) {
+    fail('ac7 codex: --model-provider requires --base-url', 2);
+  }
+  if (baseUrl !== undefined && modelProviderName === undefined) {
+    fail('ac7 codex: --base-url requires --model-provider', 2);
+  }
+  if (wireApi !== undefined && wireApi !== 'chat' && wireApi !== 'responses') {
+    fail(`ac7 codex: --wire-api must be 'chat' or 'responses', got '${wireApi}'`, 2);
+  }
+
+  const modelProvider =
+    modelProviderName !== undefined && baseUrl !== undefined
+      ? {
+          name: modelProviderName,
+          baseUrl,
+          wireApi: wireApi as 'chat' | 'responses' | undefined,
+        }
+      : undefined;
 
   try {
     const resolved = await resolveAuthOrConnect({ url, token });
@@ -868,6 +907,7 @@ async function handleCodex(args: string[]): Promise<void> {
       token: resolved.token,
       cwd,
       model,
+      modelProvider,
       noTrace,
     });
     process.exit(code);

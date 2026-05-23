@@ -154,9 +154,15 @@ and platform-specific defaults elsewhere. Useful overrides:
 
 A few variables you might expect us to read but we don't:
 
-- `OPENAI_API_KEY` — codex's auth comes from `~/.codex/auth.json`,
-  which the runner symlinks into the ephemeral `CODEX_HOME`. We
-  don't set `OPENAI_API_KEY` ourselves.
+- `OPENAI_API_KEY` — for standard OpenAI use, codex's auth comes from
+  `~/.codex/auth.json`, which the runner symlinks into the ephemeral
+  `CODEX_HOME`. We don't read or set this ourselves in that case.
+  **Exception:** when `--model-provider` is set (local provider), the
+  runner injects `OPENAI_API_KEY=local` into the codex child env if
+  the variable is not already present in the operator's environment.
+  Most local servers accept any non-empty value. If your server uses
+  a different key name, pass it via `--wire-api` / `--model-provider`
+  and set the env var in your shell before running `ac7 codex`.
 - `ANTHROPIC_API_KEY` — claude-code reads this directly. The
   runner doesn't touch it.
 - Any GitHub / Slack / etc. integration tokens — there are no
