@@ -275,14 +275,16 @@ to `codex app-server`:
 # llama.cpp / llama-server on :8000 (e.g. Qwen-MoE, Gemma-MoE)
 ac7 codex -- \
   -c 'model_provider="local"' \
+  -c 'model_providers.local.name="local"' \
   -c 'model_providers.local.base_url="http://localhost:8000/v1"' \
-  -c 'model_providers.local.wire_api="chat"'
+  -c 'model_providers.local.wire_api="responses"'
 
 # Ollama
 ac7 codex -- \
   -c 'model_provider="ollama"' \
+  -c 'model_providers.ollama.name="ollama"' \
   -c 'model_providers.ollama.base_url="http://localhost:11434/v1"' \
-  -c 'model_providers.ollama.wire_api="chat"' \
+  -c 'model_providers.ollama.wire_api="responses"' \
   --model llama3.2
 ```
 
@@ -291,12 +293,27 @@ form works too:
 
 ```bash
 ac7 codex -c 'model_provider="local"' \
-          -c 'model_providers.local.base_url="http://localhost:8000/v1"'
+          -c 'model_providers.local.name="local"' \
+          -c 'model_providers.local.base_url="http://localhost:8000/v1"' \
+          -c 'model_providers.local.wire_api="responses"'
 ```
 
 For providers that don't require an API key, set `OPENAI_API_KEY` to any
 non-empty string in your shell environment — codex checks for the variable's
 presence but the value is unused by local servers.
+
+### Codex 0.120+ requirements
+
+Codex 0.120+ uses the OpenAI Responses API (`/v1/responses`) exclusively —
+the chat-completions path is no longer supported. Every local provider must
+expose `/v1/responses`. llama-server build 8826+ includes this endpoint.
+
+Two `model_providers.*` fields are required in 0.120+:
+
+| Field | Notes |
+|---|---|
+| `wire_api` | Must be `"responses"` — `"chat"` is no longer accepted |
+| `name` | Must be set explicitly to the provider key (e.g. `"local"`) |
 
 ## Common patterns
 
@@ -318,7 +335,9 @@ ac7 codex --no-trace
 # Point at a local llama-server
 ac7 codex -- \
   -c 'model_provider="local"' \
-  -c 'model_providers.local.base_url="http://localhost:8000/v1"'
+  -c 'model_providers.local.name="local"' \
+  -c 'model_providers.local.base_url="http://localhost:8000/v1"' \
+  -c 'model_providers.local.wire_api="responses"'
 ```
 
 ## What you give up vs claude-code
