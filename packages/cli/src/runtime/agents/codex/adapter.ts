@@ -108,6 +108,14 @@ export interface CodexSpawnOptions {
   cwd?: string;
   /** Optional model override (`--model`). */
   model?: string;
+  /**
+   * Extra args forwarded verbatim to `codex app-server` after the
+   * subcommand. The operator is responsible for the codex version
+   * accepting these; ac7 passes them through unchanged.
+   * Use codex's own `-c key=value` syntax to override config.toml entries,
+   * e.g. `-c 'model_provider="qwen"'`.
+   */
+  codexArgs?: string[];
   /** Presence signal — flipped by status notifications. */
   presence: Presence;
   /**
@@ -179,12 +187,17 @@ export async function spawnCodex(opts: CodexSpawnOptions): Promise<CodexSpawnRes
   }
 
   // 3. Spawn codex app-server. Default --listen=stdio:// — we own the
-  //    child's stdin/stdout. We pass NO extra flags so the same code
-  //    path works against every codex version that ships `app-server`
-  //    (older builds reject `--session-source`; the field is optional
-  //    and only affects analytics labelling).
-  opts.log('codex: spawning', { binary: opts.codexBinary, codexHome: codexHome.path });
-  const child = spawn(opts.codexBinary, ['app-server'], {
+  //    child's stdin/stdout. ac7-injected flags are kept to zero so
+  //    the same code path works across every codex version that ships
+  //    `app-server` (older builds reject unknown flags). User-supplied
+  //    `codexArgs` are appended verbatim — the operator has chosen
+  //    their codex version and accepts responsibility for compatibility.
+  opts.log('codex: spawning', {
+    binary: opts.codexBinary,
+    codexHome: codexHome.path,
+    codexArgs: opts.codexArgs ?? [],
+  });
+  const child = spawn(opts.codexBinary, ['app-server', ...(opts.codexArgs ?? [])], {
     cwd,
     env: childEnv,
     stdio: ['pipe', 'pipe', 'inherit'],

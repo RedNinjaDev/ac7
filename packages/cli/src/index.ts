@@ -57,7 +57,7 @@ usage:
   ac7 quickstart  [--skip-browser] [--assignee <name>]   seed a demo objective + open the web UI
   ac7 telemetry   enable|disable|preview|rotate|status       opt-in, zero-PII, off-by-default install telemetry
   ac7 claude-code [--no-trace] [--doctor] [--skip-doctor] [--unsafe-tls] [-- <claude args>...]   spawn claude-code wrapped in a ac7 runner
-  ac7 codex       [--no-trace] [--cwd <dir>] [--model <name>]   spawn OpenAI Codex CLI as a headless agent member of a ac7 team
+  ac7 codex       [--no-trace] [--cwd <dir>] [--model <name>] [-- <codex args>...]   spawn OpenAI Codex CLI as a headless agent member of a ac7 team
   ac7 push        --body <text> (--agent <id> | --broadcast) [--title <t>] [--level <lvl>] [--data key=value]...
   ac7 roster      [--reveal-token --member <name> [--config-path <path>]]
                                     list teammates (no flags) or rotate+print a user's token (alias over 'ac7 rotate')
@@ -812,11 +812,14 @@ async function handleClaudeCode(args: string[]): Promise<void> {
  * `turn/steer` (mid-turn) — the structural equivalent of claude-code's
  * `notifications/claude/channel` ambient injection.
  *
- * Args (everything is optional):
- *   --no-trace           disable the MITM trace host
- *   --cwd <dir>          working directory for codex (default: cwd)
- *   --model <name>       override the codex model (default: codex picks)
- *   --url / --token      same as the other ac7 verbs
+ * Arg handling: `--url` and `--token` are ac7 knobs; `--no-trace`,
+ * `--cwd`, and `--model` are runner knobs. Everything after a literal
+ * `--` is forwarded verbatim to `codex app-server`. Unrecognized args
+ * before `--` also fall through to codex (same pattern as claude-code).
+ *
+ * Use codex's own -c key=value syntax to override config.toml entries:
+ *   ac7 codex -- -c 'model_provider="qwen"' \
+ *               -c 'model_providers.qwen.base_url="http://localhost:8000/v1"'
  */
 async function handleCodex(args: string[]): Promise<void> {
   let url: string | undefined;
@@ -824,10 +827,20 @@ async function handleCodex(args: string[]): Promise<void> {
   let cwd: string | undefined;
   let model: string | undefined;
   let noTrace = false;
+  const codexArgs: string[] = [];
+  let seenDashDash = false;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === undefined) continue;
+    if (seenDashDash) {
+      codexArgs.push(arg);
+      continue;
+    }
+    if (arg === '--') {
+      seenDashDash = true;
+      continue;
+    }
     if (arg === '-h' || arg === '--help') {
       process.stdout.write(USAGE);
       return;
@@ -858,7 +871,10 @@ async function handleCodex(args: string[]): Promise<void> {
       i++;
       continue;
     }
-    fail(`ac7 codex: unknown arg: ${arg}`, 2);
+    // Anything unrecognized falls through to codex — same pattern as
+    // handleClaudeCode. This lets `ac7 codex -c 'key=value'` work the
+    // same as `ac7 codex -- -c 'key=value'`.
+    codexArgs.push(arg);
   }
 
   try {
@@ -869,6 +885,7 @@ async function handleCodex(args: string[]): Promise<void> {
       cwd,
       model,
       noTrace,
+      codexArgs: codexArgs.length > 0 ? codexArgs : undefined,
     });
     process.exit(code);
   } catch (err) {
