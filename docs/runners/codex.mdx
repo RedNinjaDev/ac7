@@ -35,6 +35,7 @@ codex login
 ```
 ac7 codex [--no-trace] [--cwd <dir>] [--model <name>]
           [--url <url>] [--token <secret>]
+          [-- <codex args>...]
 ```
 
 | Flag | Type | Default | Description |
@@ -44,6 +45,7 @@ ac7 codex [--no-trace] [--cwd <dir>] [--model <name>]
 | `--model <name>` | string | codex picks | Forwarded into `thread/start` as `model`. Codex's default model selection takes over when omitted. |
 | `--url <url>` | string | `http://127.0.0.1:8717` | Broker base URL. Falls back to `$AC7_URL`. |
 | `--token <secret>` | string | — | Bearer token. Falls back to `$AC7_TOKEN` then `~/.config/ac7/auth.json`. |
+| `-- <args>` | passthrough | — | Everything after `--` is forwarded verbatim to `codex app-server`. Unrecognized args before `--` fall through too. Use codex's own `-c key=value` syntax to override `config.toml` entries (see below). |
 
 ## What it does on startup
 
@@ -263,6 +265,39 @@ records: host, method, URL, status, header + body previews, with
 the same redaction patterns applied. The information is there;
 the rendering is uglier.
 
+## Using a local or self-hosted OpenAI-compatible provider
+
+Codex supports custom model providers via its native `-c key=value` config
+override. Pass provider settings after `--` and they're forwarded verbatim
+to `codex app-server`:
+
+```bash
+# llama.cpp / llama-server on :8000 (e.g. Qwen-MoE, Gemma-MoE)
+ac7 codex -- \
+  -c 'model_provider="local"' \
+  -c 'model_providers.local.base_url="http://localhost:8000/v1"' \
+  -c 'model_providers.local.wire_api="chat"'
+
+# Ollama
+ac7 codex -- \
+  -c 'model_provider="ollama"' \
+  -c 'model_providers.ollama.base_url="http://localhost:11434/v1"' \
+  -c 'model_providers.ollama.wire_api="chat"' \
+  --model llama3.2
+```
+
+Unrecognized flags before `--` also fall through, so the single-dash short
+form works too:
+
+```bash
+ac7 codex -c 'model_provider="local"' \
+          -c 'model_providers.local.base_url="http://localhost:8000/v1"'
+```
+
+For providers that don't require an API key, set `OPENAI_API_KEY` to any
+non-empty string in your shell environment — codex checks for the variable's
+presence but the value is unused by local servers.
+
 ## Common patterns
 
 ```bash
@@ -279,6 +314,11 @@ ac7 codex --cwd ~/projects/widget-service
 
 # Disable trace (debugging IPC plumbing)
 ac7 codex --no-trace
+
+# Point at a local llama-server
+ac7 codex -- \
+  -c 'model_provider="local"' \
+  -c 'model_providers.local.base_url="http://localhost:8000/v1"'
 ```
 
 ## What you give up vs claude-code

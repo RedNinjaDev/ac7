@@ -57,6 +57,11 @@ export interface CodexCommandInput {
   model?: string;
   /** Disable trace capture. */
   noTrace?: boolean;
+  /**
+   * Extra args forwarded verbatim to `codex app-server`. Populated by
+   * everything the caller passes after `--` on the command line.
+   */
+  codexArgs?: string[];
   /** Optional logger override; defaults to a session log + stderr. */
   log?: (msg: string, ctx?: Record<string, unknown>) => void;
   /** Override the bridge command (tests). */
@@ -183,6 +188,7 @@ export async function runCodexCommand(input: CodexCommandInput): Promise<number>
       codexBinary,
       cwd,
       model: input.model,
+      codexArgs: input.codexArgs,
       presence,
       // Share the trace host's busy signal so codex tool-lifecycle
       // notifications and MITM-derived LLM bumps both feed one
