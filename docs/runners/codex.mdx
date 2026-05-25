@@ -279,13 +279,15 @@ ac7 codex -- \
   -c 'model_providers.local.base_url="http://localhost:8000/v1"' \
   -c 'model_providers.local.wire_api="responses"'
 
-# Ollama
-ac7 codex -- \
+# Ollama. Note `--model` is an ac7 flag (forwarded over JSON-RPC
+# `thread/start`, not the codex CLI), so it goes BEFORE `--`. The codex
+# CLI's app-server subcommand has no `--model` flag of its own; if you
+# prefer the codex-native form, use `-c 'model="llama3.2"'` after `--`.
+ac7 codex --model llama3.2 -- \
   -c 'model_provider="ollama"' \
   -c 'model_providers.ollama.name="ollama"' \
   -c 'model_providers.ollama.base_url="http://localhost:11434/v1"' \
-  -c 'model_providers.ollama.wire_api="responses"' \
-  --model llama3.2
+  -c 'model_providers.ollama.wire_api="responses"'
 ```
 
 Unrecognized flags before `--` also fall through, so the single-dash short
