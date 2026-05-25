@@ -48,8 +48,8 @@ vi.mock('../../../src/runtime/agents/codex/channel-sink.js', () => ({
   })),
 }));
 
-import { spawnCodex } from '../../../src/runtime/agents/codex/adapter.js';
 import type { BriefingResponse } from '@agentc7/sdk/types';
+import { spawnCodex } from '../../../src/runtime/agents/codex/adapter.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -72,22 +72,33 @@ function makeFakeChild() {
 const MINIMAL_BRIEFING: BriefingResponse = {
   name: 'test-agent',
   role: { title: 'tester', description: '' },
-  team: { name: 'test-team', directive: 'test', context: '' },
+  team: { name: 'test-team', directive: 'test', context: '', permissionPresets: {} },
   instructions: '',
   permissions: [],
+  teammates: [],
+  openObjectives: [],
 };
 
+// Plain object (no `as const`) so spread-extension types stay assignable
+// to `CodexSpawnOptions` — `as const` would freeze `bridgeArgs` to a
+// readonly tuple and break the mutable `string[]` parameter shape.
 const BASE_OPTS = {
   briefing: MINIMAL_BRIEFING,
   runnerSocketPath: '/tmp/sock',
   bridgeCommand: '/usr/bin/node',
   bridgeArgs: ['/path/to/cli', 'mcp-bridge'],
-  traceHost: null as null,
+  traceHost: null,
   codexBinary: '/usr/bin/codex',
   cwd: '/tmp',
-  presence: { setOnline: vi.fn(), setOffline: vi.fn(), setConnecting: vi.fn() },
+  presence: {
+    state: 'connecting' as const,
+    setConnecting: vi.fn(),
+    setOnline: vi.fn(),
+    setOffline: vi.fn(),
+    subscribe: vi.fn(() => () => {}),
+  },
   log: vi.fn(),
-} as const;
+};
 
 // ── Tests ─────────────────────────────────────────────────────────────
 
@@ -107,7 +118,12 @@ describe('spawnCodex — codexArgs passthrough', () => {
   });
 
   it('appends codexArgs verbatim after app-server', async () => {
-    const codexArgs = ['-c', 'model_provider="qwen"', '-c', 'model_providers.qwen.base_url="http://localhost:8000/v1"'];
+    const codexArgs = [
+      '-c',
+      'model_provider="qwen"',
+      '-c',
+      'model_providers.qwen.base_url="http://localhost:8000/v1"',
+    ];
 
     const promise = spawnCodex({ ...BASE_OPTS, codexArgs });
     // Yield so the async setup inside spawnCodex can run.
